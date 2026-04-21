@@ -1,5 +1,11 @@
 import SwiftUI
 
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
 struct HomeView: View {
     @StateObject private var api = InvidiousAPI.shared
     @State private var videos: [InvidiousVideo] = []
@@ -9,6 +15,7 @@ struct HomeView: View {
     @State private var showAuthSheet = false
 
     let chips = ["Главная", "Музыка", "Игры", "Новости", "Технологии"]
+    let chipQueries = ["популярное 2025", "music hits 2025", "gaming 2025", "новости", "tech review 2025"]
 
     var body: some View {
         NavigationStack {
@@ -81,10 +88,10 @@ struct HomeView: View {
     private var chipsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(chips, id: \.self) { chip in
+                ForEach(Array(chips.enumerated()), id: \.element) { i, chip in
                     Button(chip) {
                         selectedChip = chip
-                        Task { await loadTrending() }
+                        Task { await loadChip(index: i) }
                     }
                     .font(.system(size: 12, weight: .medium))
                     .padding(.horizontal, 14).padding(.vertical, 7)
@@ -116,14 +123,37 @@ struct HomeView: View {
         }
     }
 
+    private func loadChip(index: Int) async {
+        isLoading = true
+        errorMessage = nil
+        let query = chipQueries[safe: index] ?? chipQueries[0]
+        do {
+            videos = try await api.search(query: query, page: 1)
+            if videos.isEmpty { errorMessage = "Нет видео. Попробуйте позже." }
+        } catch {
+            errorMessage = "Не удалось загрузить."
+        }
+        isLoading = false
+    }
+
     private func loadTrending() async {
         isLoading = true
         errorMessage = nil
+
+        // Trending сломан на всех публичных инстансах — используем поиск популярного
+        let queries = ["популярное", "music 2025", "новости сегодня", "gaming", "tech 2025"]
+        let query = queries[Int.random(in: 0..<queries.count)]
+
         do {
-            videos = try await api.trending()
+            videos = try await api.search(query: query, page: 1)
             if videos.isEmpty { errorMessage = "Нет видео. Попробуйте позже." }
         } catch {
-            errorMessage = "Не удалось загрузить.\n\(error.localizedDescription)"
+            // Последняя попытка — другой запрос
+            do {
+                videos = try await api.search(query: "youtube 2025", page: 1)
+            } catch {
+                errorMessage = "Не удалось загрузить.\n\(error.localizedDescription)"
+            }
         }
         isLoading = false
     }
