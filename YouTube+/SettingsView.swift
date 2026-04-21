@@ -44,6 +44,7 @@ struct SettingsView: View {
                     Text(api.instanceStatus)
                         .font(.system(size: 11))
                         .foregroundColor(Theme.text3)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Button {

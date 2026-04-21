@@ -92,8 +92,8 @@ struct InvidiousVideo: Codable, Identifiable {
         return "\(Int(diff/2592000)) мес. назад"
     }
 
-    var durationFormatted: String {
-        let s = lengthSeconds ?? 0
+    var durationFormatted: String? {
+        guard let s = lengthSeconds, s > 0 else { return nil }
         let h = s / 3600; let m = (s % 3600) / 60; let sec = s % 60
         if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
         return String(format: "%d:%02d", m, sec)
@@ -111,6 +111,8 @@ struct InvidiousVideoDetail: Codable {
     let viewCount: Int?
     let likeCount: Int?
     let description: String?
+    let hlsUrl: String?          // HLS m3u8 manifest — best option for AVPlayer
+    let dashUrl: String?         // DASH manifest — fallback
     let adaptiveFormats: [AdaptiveFormat]?
     let formatStreams: [FormatStream]?
     let recommendedVideos: [InvidiousVideo]?

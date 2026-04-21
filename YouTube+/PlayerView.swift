@@ -26,6 +26,7 @@ struct PlayerView: View {
         }
         .navigationBarHidden(true)
         .task { await vm.load(video: video, context: context) }
+        .onDisappear { vm.cleanup() }
         .sheet(isPresented: $showQualitySheet) { qualitySheet }
     }
 
@@ -254,76 +255,86 @@ final class PlayerViewModel: ObservableObject {
     private func buildQualityList(from d: InvidiousVideoDetail) {
         let order = ["144p", "240p", "360p", "480p", "720p", "720p60", "1080p", "1080p60", "1440p", "2160p"]
 
-        // formatStreams — combined video+audio, most reliable
-        var fromStreams = d.safeFormatStreams
-            .compactMap { $0.qualityLabel }
-            .filter { !$0.isEmpty }
-
-        // adaptiveFormats — separate video tracks
-        let fromAdaptive = d.safeAdaptiveFormats
-            .filter { $0.isVideo }
-            .compactMap { $0.qualityLabel }
-            .filter { !$0.isEmpty }
-
+        var fromStreams = d.safeFormatStreams.compactMap { $0.qualityLabel }.filter { !$0.isEmpty }
+        let fromAdaptive = d.safeAdaptiveFormats.filter { $0.isVideo }.compactMap { $0.qualityLabel }.filter { !$0.isEmpty }
         fromStreams += fromAdaptive
 
-        // deduplicate
         var seen = Set<String>()
         let unique = fromStreams.filter { seen.insert($0).inserted }
-
-        // sort by preferred order
         let sorted = order.filter { unique.contains($0) }
         videoQualities = sorted.isEmpty ? unique : sorted
 
-        let preferred = ["720p", "720p60", "480p", "360p", "240p"]
-        selectedQuality = preferred.first { videoQualities.contains($0) } ?? videoQualities.first ?? "360p"
+        // HLS available — auto quality switching, set as default
+        if d.hlsUrl != nil {
+            if !videoQualities.contains("HLS (авто)") {
+                videoQualities.insert("HLS (авто)", at: 0)
+            }
+            selectedQuality = "HLS (авто)"
+        } else {
+            let preferred = ["720p", "720p60", "480p", "360p", "240p"]
+            selectedQuality = preferred.first { videoQualities.contains($0) } ?? videoQualities.first ?? "360p"
+        }
+    }
     }
 
     func selectQuality(_ quality: String) {
         selectedQuality = quality
         guard let detail else { return }
-        Task { await playStream(detail: detail, quality: quality) }
+        Task {
+            if quality == "HLS (авто)", let hls = detail.hlsUrl, let url = URL(string: hls) {
+                start(url: url)
+            } else {
+                await playStream(detail: detail, quality: quality)
+            }
+        }
     }
 
     private func playStream(detail: InvidiousVideoDetail, quality: String) async {
         loadError = ""
 
+        // 1. HLS manifest — best option: native iOS format, AVPlayer handles quality switching
+        //    Works with local=true proxy, doesn't expire, supports all qualities
+        if let hls = detail.hlsUrl, !quality.contains("kbps"), let url = URL(string: hls) {
+            start(url: url)
+            return
+        }
+
+        // 2. Audio only
         if quality.contains("kbps") {
             if let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio }),
                let url = URL(string: audio.url) {
                 start(url: url); return
             }
-            // fallback: use any formatStream (has audio)
             if let s = detail.safeFormatStreams.first, let url = URL(string: s.url) {
                 start(url: url); return
             }
             return
         }
 
-        // 1. formatStream exact match (video+audio combined)
+        // 3. formatStreams exact quality match (video+audio combined, proxied via local=true)
         if let s = detail.safeFormatStreams.first(where: { $0.qualityLabel == quality }),
            let url = URL(string: s.url) {
             start(url: url); return
         }
 
-        // 2. any formatStream (best available)
+        // 4. Any formatStream (most reliable fallback)
         if let s = detail.safeFormatStreams.first, let url = URL(string: s.url) {
             start(url: url); return
         }
 
-        // 3. adaptiveFormat video
+        // 5. adaptiveFormats video (may be separate stream without audio)
         if let f = detail.safeAdaptiveFormats.first(where: { $0.qualityLabel == quality && $0.isVideo }),
            let url = URL(string: f.url) {
             start(url: url); return
         }
 
-        // 4. any adaptive video
+        // 6. Any adaptive video
         if let f = detail.safeAdaptiveFormats.first(where: { $0.isVideo }),
            let url = URL(string: f.url) {
             start(url: url); return
         }
 
-        loadError = "Нет доступных потоков для этого видео"
+        loadError = "Нет доступных потоков"
     }
 
     private func start(url: URL) {
@@ -365,6 +376,17 @@ final class PlayerViewModel: ObservableObject {
                                    thumbnailURL: video.bestThumbnail, duration: video.lengthSeconds ?? 0)
         context.insert(item)
         try? context.save()
+    }
+
+    func cleanup() {
+        if let obs = timeObserver, let p = player {
+            p.removeTimeObserver(obs)
+            timeObserver = nil
+        }
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        pipController = nil
     }
 }
 
