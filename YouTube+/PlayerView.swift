@@ -293,9 +293,10 @@ final class PlayerViewModel: ObservableObject {
 
         // Audio only
         if quality.contains("kbps") {
-            let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio })
-                ?? detail.safeFormatStreams.first
-            if let url = audio.flatMap({ URL(string: $0.url) }) { start(url: url) }
+            if let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio }),
+               let url = URL(string: audio.url) { start(url: url); return }
+            if let s = detail.safeFormatStreams.first,
+               let url = URL(string: s.url) { start(url: url) }
             return
         }
 
