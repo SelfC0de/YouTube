@@ -116,12 +116,12 @@ struct ProxiedImage: View {
         loading = true
         image = nil
 
-        // Пробуем прямой URL сначала
-        if let img = await fetch(url) {
+        // api.selfcode-api.win — DNS only, без Cloudflare, кастомный URLSession доверяет самоподписанному SSL
+        if let img = await fetch(proxyURL) {
             image = img; loading = false; return
         }
-        // Fallback: через прокси
-        if let img = await fetch(proxyURL) {
+        // Fallback: прямой URL
+        if let img = await fetch(url) {
             image = img; loading = false; return
         }
         loading = false
@@ -129,7 +129,7 @@ struct ProxiedImage: View {
 
     private var proxyURL: String {
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "https://selfcode-api.win/proxy/thumbnails?url=\(encoded)"
+        return "https://api.selfcode-api.win/proxy/thumbnails?url=\(encoded)"
     }
 
     private func fetch(_ urlString: String) async -> UIImage? {
