@@ -2,18 +2,19 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var api = InvidiousAPI.shared
-    @State private var pingResults: [String: Bool] = [:]
-    @State private var isPinging = false
     @State private var showHistory = false
     @State private var sponsorBlockEnabled = UserDefaults.standard.bool(forKey: "sponsorBlockEnabled")
-    @State private var returnDislikeEnabled = UserDefaults.standard.bool(forKey: "returnDislikeEnabled") == false ? true : UserDefaults.standard.bool(forKey: "returnDislikeEnabled")
+    @State private var returnDislikeEnabled: Bool = {
+        let val = UserDefaults.standard.object(forKey: "returnDislikeEnabled")
+        return val == nil ? true : UserDefaults.standard.bool(forKey: "returnDislikeEnabled")
+    }()
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Theme.bg.ignoresSafeArea()
                 List {
-                    instancesSection
+                    statusSection
                     featuresSection
                     historySection
                     aboutSection
@@ -29,53 +30,37 @@ struct SettingsView: View {
         .sheet(isPresented: $showHistory) { HistoryView() }
     }
 
-    private var instancesSection: some View {
+    private var statusSection: some View {
         Section {
-            ForEach(InvidiousAPI.instances, id: \.self) { instance in
-                Button { api.setInstance(instance) } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(instance.replacingOccurrences(of: "https://", with: ""))
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(Theme.text)
-                            if let ok = pingResults[instance] {
-                                Text(ok ? "Доступен" : "Недоступен")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(ok ? Theme.green : Theme.accent)
-                            }
-                        }
-                        Spacer()
-                        if api.currentInstance == instance {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(Theme.accent)
-                        }
-                    }
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(api.currentInstance.isEmpty ? Theme.text3 : Theme.green)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: api.currentInstance.isEmpty ? .clear : Theme.green, radius: 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(api.currentInstance.isEmpty ? "Поиск инстанса..." : "Подключено")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Theme.text)
+                    Text(api.instanceStatus)
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.text3)
                 }
-                .listRowBackground(Theme.bg2)
-                .listRowSeparatorTint(Color.white.opacity(0.06))
-            }
-
-            Button {
-                isPinging = true
-                Task {
-                    for instance in InvidiousAPI.instances {
-                        let ok = await api.pingInstance(instance)
-                        pingResults[instance] = ok
+                Spacer()
+                Button {
+                    Task {
+                        api.currentInstance = ""
+                        await api.ensureInstance()
                     }
-                    isPinging = false
-                }
-            } label: {
-                HStack {
-                    Label("Проверить все", systemImage: "network")
+                } label: {
+                    Image(systemName: "arrow.clockwise")
                         .foregroundColor(Theme.accent)
-                        .font(.system(size: 13))
-                    if isPinging { Spacer(); ProgressView().tint(Theme.accent).scaleEffect(0.8) }
+                        .font(.system(size: 14))
                 }
             }
             .listRowBackground(Theme.bg2)
             .listRowSeparatorTint(Color.white.opacity(0.06))
         } header: {
-            Text("Invidious инстанс")
+            Text("Invidious")
                 .foregroundColor(Theme.text3)
                 .font(.system(size: 11))
         }

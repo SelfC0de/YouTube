@@ -7,19 +7,18 @@ struct SubscriptionsView: View {
     @StateObject private var auth = AuthManager.shared
     @State private var feedVideos: [InvidiousVideo] = []
     @State private var isLoading = false
-    @State private var showImportSheet = false
-    @State private var selectedChannel: LocalSubscription?
+    @State private var showAuthSheet = false
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Theme.bg.ignoresSafeArea()
-                if subscriptions.isEmpty {
+                if subscriptions.isEmpty && !auth.isLoggedIn {
                     emptyState
                 } else {
                     ScrollView {
                         VStack(spacing: 0) {
-                            channelsList
+                            if !subscriptions.isEmpty { channelsList }
                             Divider().background(Color.white.opacity(0.06)).padding(.vertical, 8)
                             feedSection
                         }
@@ -32,13 +31,15 @@ struct SubscriptionsView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showImportSheet = true } label: {
-                        Image(systemName: "square.and.arrow.down")
-                            .foregroundColor(Theme.accent)
+                    Button {
+                        showAuthSheet = true
+                    } label: {
+                        Image(systemName: auth.isLoggedIn ? "person.circle.fill" : "person.circle")
+                            .foregroundColor(auth.isLoggedIn ? Theme.accent : Theme.text2)
                     }
                 }
             }
-            .sheet(isPresented: $showImportSheet) { ImportSheet() }
+            .sheet(isPresented: $showAuthSheet) { ImportSheet() }
         }
         .task { if !subscriptions.isEmpty { await loadFeed() } }
     }
@@ -55,8 +56,10 @@ struct SubscriptionsView: View {
                 .font(.system(size: 14))
                 .foregroundColor(Theme.text3)
                 .multilineTextAlignment(.center)
-            Button { showImportSheet = true } label: {
-                Label("Импортировать CSV", systemImage: "square.and.arrow.down")
+            Button {
+                showAuthSheet = true
+            } label: {
+                Label("Войти / Импортировать", systemImage: "person.badge.plus")
                     .font(.system(size: 14, weight: .semibold))
                     .padding(.horizontal, 20).padding(.vertical, 12)
                     .background(Theme.accent)
@@ -71,20 +74,17 @@ struct SubscriptionsView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
                 ForEach(subscriptions) { sub in
-                    Button { selectedChannel = sub } label: {
-                        VStack(spacing: 6) {
-                            Circle()
-                                .fill(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .frame(width: 52, height: 52)
-                                .overlay(Text(String(sub.channelName.prefix(1))).font(.system(size: 18, weight: .bold)).foregroundColor(.white))
-                            Text(sub.channelName)
-                                .font(.system(size: 10))
-                                .foregroundColor(Theme.text2)
-                                .lineLimit(1)
-                                .frame(width: 60)
-                        }
+                    VStack(spacing: 6) {
+                        Circle()
+                            .fill(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 52, height: 52)
+                            .overlay(Text(String(sub.channelName.prefix(1))).font(.system(size: 18, weight: .bold)).foregroundColor(.white))
+                        Text(sub.channelName)
+                            .font(.system(size: 10))
+                            .foregroundColor(Theme.text2)
+                            .lineLimit(1)
+                            .frame(width: 60)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 16)
@@ -126,7 +126,7 @@ struct SubscriptionsView: View {
     }
 }
 
-// MARK: - Import Sheet
+// MARK: - Auth/Import Sheet
 struct ImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -149,14 +149,13 @@ struct ImportSheet: View {
                         Text("Google CSV").tag(1)
                     }
                     .pickerStyle(.segmented)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 16)
+                    .padding(16)
 
                     if tab == 0 { invidiousLogin } else { csvImport }
                     Spacer()
                 }
             }
-            .navigationTitle("Авторизация")
+            .navigationTitle(tab == 0 ? "Войти" : "Импорт подписок")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.bg2, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -167,39 +166,51 @@ struct ImportSheet: View {
             }
         }
         .presentationBackground(Theme.bg)
+        .presentationDetents([.medium, .large])
     }
 
     private var invidiousLogin: some View {
         VStack(spacing: 16) {
             if auth.isLoggedIn {
-                VStack(spacing: 12) {
+                VStack(spacing: 16) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 40))
+                        .font(.system(size: 48))
                         .foregroundColor(Theme.green)
-                    Text("Вы вошли как \(auth.username)")
-                        .foregroundColor(Theme.text2)
+                    Text("Вы вошли как")
+                        .foregroundColor(Theme.text3)
+                        .font(.system(size: 13))
+                    Text(auth.username)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(Theme.text)
                     Button {
                         auth.logout()
                     } label: {
                         Text("Выйти")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                             .background(Theme.bg2).foregroundColor(Theme.accent)
                             .cornerRadius(14)
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.accent.opacity(0.3), lineWidth: 1))
                     }
-                    .padding(.horizontal, 16)
                 }
-                .padding(.top, 30)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
             } else {
                 VStack(spacing: 12) {
                     TextField("Имя пользователя", text: $username)
                         .textFieldStyle(YPTextFieldStyle())
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                     SecureField("Пароль", text: $password)
                         .textFieldStyle(YPTextFieldStyle())
+
                     if let err = loginError {
-                        Text(err).font(.system(size: 12)).foregroundColor(Theme.accent)
+                        Text(err)
+                            .font(.system(size: 12))
+                            .foregroundColor(Theme.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
                     Button {
                         isLoggingIn = true
                         loginError = nil
@@ -210,37 +221,43 @@ struct ImportSheet: View {
                         }
                     } label: {
                         Group {
-                            if isLoggingIn { ProgressView().tint(.white) }
-                            else { Text("Войти").font(.system(size: 15, weight: .semibold)) }
+                            if isLoggingIn {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text("Войти").font(.system(size: 15, weight: .semibold))
+                            }
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
-                        .background(Theme.accent).foregroundColor(.white)
+                        .background(username.isEmpty || password.isEmpty ? Theme.bg3 : Theme.accent)
+                        .foregroundColor(.white)
                         .cornerRadius(14)
                     }
                     .disabled(username.isEmpty || password.isEmpty || isLoggingIn)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
 
-                Text("Аккаунт создаётся на публичном Invidious инстансе.\nГугл аккаунт не нужен.")
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.text3)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
+                    Text("Аккаунт создаётся на публичном Invidious инстансе. Google аккаунт не нужен.")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.text3)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 20)
             }
         }
     }
 
     private var csvImport: some View {
-        VStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Как импортировать:")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Theme.text2)
-                ForEach(["1. Откройте takeout.google.com", "2. Выберите только YouTube", "3. Скачайте архив", "4. Найдите файл subscriptions.csv", "5. Загрузите его ниже"], id: \.self) { step in
+        VStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach([
+                    "1. Откройте takeout.google.com",
+                    "2. Выберите только YouTube",
+                    "3. Скачайте архив",
+                    "4. Найдите subscriptions.csv",
+                    "5. Загрузите файл ниже"
+                ], id: \.self) { step in
                     Text(step).font(.system(size: 13)).foregroundColor(Theme.text3)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .background(Theme.bg2)
             .cornerRadius(14)
@@ -260,7 +277,7 @@ struct ImportSheet: View {
                     .cornerRadius(14)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.commaSeparatedText]) { result in
             switch result {
             case .success(let url):
