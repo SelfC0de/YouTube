@@ -7,11 +7,21 @@ final class InvidiousAPI: ObservableObject {
     @Published var currentInstance: String = ""
     @Published var instanceStatus: String = "Поиск..."
 
-    // Official instances from docs.invidious.io/instances + high-uptime extras
-    private static let hardcodedInstances: [String] = [
-        "https://inv.nadeko.net",          // 🇨🇱 official list
-        "https://invidious.nerdvpn.de",    // 🇺🇦 official list
-        "https://yewtu.be",                // 🇩🇪 official list
+    // MARK: - Свой сервер (приоритет)
+    private enum Primary {
+        static let url  = "https://youtubeplus.ydns.eu"
+        static let user = "admin"
+        static let pass = "ea399iEa2zEP9KmW3L"
+        static var auth: String {
+            "Basic " + Data("\(user):\(pass)".utf8).base64EncodedString()
+        }
+    }
+
+    // MARK: - Публичные инстансы (fallback)
+    private static let publicInstances: [String] = [
+        "https://inv.nadeko.net",
+        "https://invidious.nerdvpn.de",
+        "https://yewtu.be",
         "https://invidious.privacydev.net",
         "https://invidious.fdn.fr",
         "https://yt.cdaut.de",
@@ -21,139 +31,145 @@ final class InvidiousAPI: ObservableObject {
 
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 12
-        cfg.timeoutIntervalForResource = 30
+        cfg.timeoutIntervalForRequest = 20
+        cfg.timeoutIntervalForResource = 60
         cfg.urlCache = nil
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        return URLSession(configuration: cfg)
+        return URLSession(configuration: cfg, delegate: TrustAllDelegate(), delegateQueue: nil)
     }()
 
     private var instancesFromAPI: [String] = []
     private var isSearching = false
     private var lastInstanceFetch: Date?
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
 
     private init() {}
 
-    // MARK: - Dynamic instance list from api.invidious.io
-    private func fetchInstanceList() async {
-        // Refresh max once per hour
-        if let last = lastInstanceFetch, Date().timeIntervalSince(last) < 3600 { return }
-        guard let url = URL(string: "https://api.invidious.io/instances.json?sort_by=health") else { return }
-        do {
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 10
-            let (data, _) = try await session.data(for: req)
-            // Format: [[name, {uri, ...}], ...]
-            if let arr = try? JSONSerialization.jsonObject(with: data) as? [[Any]] {
-                let uris = arr.compactMap { pair -> String? in
-                    guard let info = pair[safe: 1] as? [String: Any],
-                          let uri = info["uri"] as? String,
-                          uri.hasPrefix("https://") else { return nil }
-                    return uri
-                }
-                if !uris.isEmpty {
-                    instancesFromAPI = uris
-                    lastInstanceFetch = Date()
-                }
-            }
-        } catch {}
-    }
-
-    var allInstances: [String] {
-        // Merge: dynamic list first, then hardcoded as fallback
-        var combined = instancesFromAPI
-        for inst in InvidiousAPI.hardcodedInstances where !combined.contains(inst) {
-            combined.append(inst)
-        }
-        return combined
-    }
-
-    // MARK: - Parallel instance discovery
+    // MARK: - Ensure instance
     func ensureInstance() async {
         guard currentInstance.isEmpty, !isSearching else { return }
         isSearching = true
         defer { isSearching = false }
+        instanceStatus = "Подключение..."
 
-        instanceStatus = "Поиск инстанса..."
+        // Пробуем свой сервер первым
+        if await pingOwn() {
+            currentInstance = Primary.url
+            instanceStatus = "youtubeplus.ydns.eu (свой)"
+            return
+        }
 
-        // Try to get fresh list
+        // Fallback — публичные параллельно
+        instanceStatus = "Поиск публичного..."
         await fetchInstanceList()
 
+        let all = instancesFromAPI.isEmpty ? InvidiousAPI.publicInstances : instancesFromAPI
         let found = await withTaskGroup(of: (String, Double)?.self) { group in
-            for inst in allInstances {
+            for inst in all {
                 group.addTask { [inst] in
-                    let start = Date()
-                    guard await self.ping(inst) else { return nil }
-                    let ms = Date().timeIntervalSince(start) * 1000
-                    return (inst, ms)
+                    let t = Date()
+                    guard await self.pingPublic(inst) else { return nil }
+                    return (inst, Date().timeIntervalSince(t))
                 }
             }
-            // Take fastest responder
             var best: (String, Double)? = nil
-            for await result in group {
-                guard let r = result else { continue }
-                if best == nil || r.1 < best!.1 {
-                    best = r
-                }
+            for await r in group {
+                guard let r else { continue }
+                if best == nil || r.1 < best!.1 { best = r }
             }
             return best?.0
         }
 
         if let inst = found {
             currentInstance = inst
-            instanceStatus = inst
-                .replacingOccurrences(of: "https://", with: "")
-                .replacingOccurrences(of: "http://", with: "")
+            instanceStatus = inst.replacingOccurrences(of: "https://", with: "")
         } else {
-            instanceStatus = "Нет доступных серверов"
+            instanceStatus = "Нет подключения"
         }
     }
 
-    private func ping(_ instance: String) async -> Bool {
-        guard let url = URL(string: "\(instance)/api/v1/stats") else { return false }
+    private func pingOwn() async -> Bool {
+        guard let url = URL(string: "\(Primary.url)/api/v1/search?q=ping") else { return false }
         do {
             var req = URLRequest(url: url)
-            req.timeoutInterval = 8
-            let (_, response) = try await session.data(for: req)
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            req.setValue(Primary.auth, forHTTPHeaderField: "Authorization")
+            req.timeoutInterval = 10
+            let (_, resp) = try await session.data(for: req)
+            return (resp as? HTTPURLResponse)?.statusCode == 200
         } catch { return false }
     }
 
+    private func pingPublic(_ instance: String) async -> Bool {
+        guard let url = URL(string: "\(instance)/api/v1/stats") else { return false }
+        do {
+            var req = URLRequest(url: url); req.timeoutInterval = 8
+            let (_, resp) = try await session.data(for: req)
+            return (resp as? HTTPURLResponse)?.statusCode == 200
+        } catch { return false }
+    }
+
+    private func fetchInstanceList() async {
+        if let last = lastInstanceFetch, Date().timeIntervalSince(last) < 3600 { return }
+        guard let url = URL(string: "https://api.invidious.io/instances.json?sort_by=health") else { return }
+        do {
+            var req = URLRequest(url: url); req.timeoutInterval = 10
+            let (data, _) = try await session.data(for: req)
+            if let arr = try? JSONSerialization.jsonObject(with: data) as? [[Any]] {
+                instancesFromAPI = arr.compactMap { pair in
+                    guard let info = pair[safe: 1] as? [String: Any],
+                          let uri = info["uri"] as? String,
+                          uri.hasPrefix("https://") else { return nil }
+                    return uri
+                }
+                lastInstanceFetch = Date()
+            }
+        } catch {}
+    }
+
     func resetAndFind() async {
-        currentInstance = ""
-        instancesFromAPI = []
-        lastInstanceFetch = nil
-        isSearching = false
+        currentInstance = ""; isSearching = false
+        instancesFromAPI = []; lastInstanceFetch = nil
         await ensureInstance()
     }
 
-    // MARK: - Core fetch with fallback
+    // MARK: - Core fetch
     func fetch(path: String) async throws -> Data {
         if currentInstance.isEmpty { await ensureInstance() }
 
-        let ordered = currentInstance.isEmpty
-            ? allInstances
-            : ([currentInstance] + allInstances.filter { $0 != currentInstance })
+        // Всегда пробуем свой сервер первым
+        if let data = try? await fetchFrom(Primary.url, path: path, auth: Primary.auth) {
+            if currentInstance != Primary.url {
+                currentInstance = Primary.url
+                instanceStatus = "youtubeplus.ydns.eu (свой)"
+            }
+            return data
+        }
 
+        // Fallback публичные
+        let all = ([currentInstance] + InvidiousAPI.publicInstances).filter { !$0.isEmpty }
         var lastErr: Error = APIError.noData
-        for inst in ordered {
-            guard let url = URL(string: "\(inst)\(path)") else { continue }
+        for inst in all where inst != Primary.url {
             do {
-                var req = URLRequest(url: url)
-                req.timeoutInterval = 15
-                let (data, resp) = try await session.data(for: req)
-                guard (resp as? HTTPURLResponse)?.statusCode == 200 else { continue }
+                let data = try await fetchFrom(inst, path: path, auth: nil)
                 if inst != currentInstance {
                     currentInstance = inst
-                    instanceStatus = inst
-                        .replacingOccurrences(of: "https://", with: "")
+                    instanceStatus = inst.replacingOccurrences(of: "https://", with: "")
                 }
                 return data
-            } catch {
-                lastErr = error
-            }
+            } catch { lastErr = error }
         }
         throw lastErr
+    }
+
+    private func fetchFrom(_ base: String, path: String, auth: String?) async throws -> Data {
+        guard let url = URL(string: "\(base)\(path)") else { throw APIError.noData }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 20
+        if let auth { req.setValue(auth, forHTTPHeaderField: "Authorization") }
+        let (data, resp) = try await session.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.noData }
+        return data
     }
 
     // MARK: - API
@@ -169,8 +185,6 @@ final class InvidiousAPI: ObservableObject {
     }
 
     func videoDetail(videoId: String) async throws -> InvidiousVideoDetail {
-        // local=true — Invidious proxies stream URLs through itself, preventing IP-based blocking
-        // hlsUrl — HLS manifest, best for AVPlayer (native iOS format, auto quality switching)
         let data = try await fetch(path: "/api/v1/videos/\(videoId)?local=true")
         return try decoder.decode(InvidiousVideoDetail.self, from: data)
     }
@@ -183,10 +197,11 @@ final class InvidiousAPI: ObservableObject {
 
     func login(username: String, password: String) async throws -> String {
         if currentInstance.isEmpty { await ensureInstance() }
-        guard !currentInstance.isEmpty else { throw APIError.noData }
+        let isOwn = currentInstance == Primary.url
         var req = URLRequest(url: URL(string: "\(currentInstance)/api/v1/auth/login")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if isOwn { req.setValue(Primary.auth, forHTTPHeaderField: "Authorization") }
         req.httpBody = try encoder.encode(["username": username, "password": password])
         let (data, resp) = try await session.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.authFailed }
@@ -196,32 +211,41 @@ final class InvidiousAPI: ObservableObject {
 
     func register(username: String, password: String) async throws {
         if currentInstance.isEmpty { await ensureInstance() }
-        guard !currentInstance.isEmpty else { throw APIError.noData }
+        let isOwn = currentInstance == Primary.url
         var req = URLRequest(url: URL(string: "\(currentInstance)/api/v1/auth/register")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if isOwn { req.setValue(Primary.auth, forHTTPHeaderField: "Authorization") }
         req.httpBody = try encoder.encode(["username": username, "password": password, "email": ""])
         let (_, resp) = try await session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 || code == 201 else { throw APIError.authFailed }
     }
 
-    // Shared coder instances (reuse = perf win)
-    private let decoder = JSONDecoder()
-    private let encoder = JSONEncoder()
-
     enum APIError: LocalizedError {
         case authFailed, noData
         var errorDescription: String? {
             switch self {
             case .authFailed: return "Ошибка авторизации"
-            case .noData: return "Нет подключения к серверу"
+            case .noData: return "Нет подключения"
             }
         }
     }
 }
 
-// Safe array subscript
+// Trust self-signed SSL certificates (needed for own server)
+private final class TrustAllDelegate: NSObject, URLSessionDelegate {
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
+}
+
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil

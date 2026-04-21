@@ -168,7 +168,6 @@ struct FormatStream: Codable, Identifiable {
     var id: String { itag ?? url }
     var displayLabel: String { qualityLabel ?? quality ?? "Unknown" }
 }
-
 // MARK: - InvidiousChannel
 struct InvidiousChannel: Codable, Identifiable {
     let authorId: String

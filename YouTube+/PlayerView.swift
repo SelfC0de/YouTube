@@ -292,43 +292,39 @@ final class PlayerViewModel: ObservableObject {
     private func playStream(detail: InvidiousVideoDetail, quality: String) async {
         loadError = ""
 
-        // 1. HLS manifest — best option: native iOS format, AVPlayer handles quality switching
-        //    Works with local=true proxy, doesn't expire, supports all qualities
-        if let hls = detail.hlsUrl, !quality.contains("kbps"), let url = URL(string: hls) {
-            start(url: url)
-            return
-        }
-
-        // 2. Audio only
+        // Audio only
         if quality.contains("kbps") {
-            if let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio }),
-               let url = URL(string: audio.url) {
-                start(url: url); return
-            }
-            if let s = detail.safeFormatStreams.first, let url = URL(string: s.url) {
-                start(url: url); return
-            }
+            let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio })
+                ?? detail.safeFormatStreams.first
+            if let url = audio.flatMap({ URL(string: $0.url) }) { start(url: url) }
             return
         }
 
-        // 3. formatStreams exact quality match (video+audio combined, proxied via local=true)
+        // 1. hlsUrl из поля (Invidious иногда заполняет)
+        if let hls = detail.hlsUrl, let url = URL(string: hls) {
+            start(url: url); return
+        }
+
+        // 2. HLS из formatStreams — itag=91 или URL содержит hls_variant
+        if let hlsStream = detail.safeFormatStreams.first(where: {
+            $0.itag == "91" || ($0.url.contains("hls_variant") || $0.url.contains("manifest"))
+        }), let url = URL(string: hlsStream.url) {
+            start(url: url); return
+        }
+
+        // 3. formatStream по выбранному качеству
         if let s = detail.safeFormatStreams.first(where: { $0.qualityLabel == quality }),
            let url = URL(string: s.url) {
             start(url: url); return
         }
 
-        // 4. Any formatStream (most reliable fallback)
-        if let s = detail.safeFormatStreams.first, let url = URL(string: s.url) {
+        // 4. Первый formatStream (видео + аудио combined, itag=18 = 360p mp4)
+        if let s = detail.safeFormatStreams.first(where: { $0.itag != "91" }),
+           let url = URL(string: s.url) {
             start(url: url); return
         }
 
-        // 5. adaptiveFormats video (may be separate stream without audio)
-        if let f = detail.safeAdaptiveFormats.first(where: { $0.qualityLabel == quality && $0.isVideo }),
-           let url = URL(string: f.url) {
-            start(url: url); return
-        }
-
-        // 6. Any adaptive video
+        // 5. adaptiveFormats видео
         if let f = detail.safeAdaptiveFormats.first(where: { $0.isVideo }),
            let url = URL(string: f.url) {
             start(url: url); return
