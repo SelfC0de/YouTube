@@ -275,7 +275,6 @@ final class PlayerViewModel: ObservableObject {
             selectedQuality = preferred.first { videoQualities.contains($0) } ?? videoQualities.first ?? "360p"
         }
     }
-    }
 
     func selectQuality(_ quality: String) {
         selectedQuality = quality
