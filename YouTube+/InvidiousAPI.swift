@@ -122,3 +122,31 @@ final class InvidiousAPI: ObservableObject {
         }
     }
 }
+
+// MARK: - Register (extension)
+extension InvidiousAPI {
+    func register(username: String, password: String) async throws {
+        await ensureInstance()
+        // Invidious registration endpoint
+        let url = URL(string: "\(currentInstance)/api/v1/auth/register")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode([
+            "username": username,
+            "password": password,
+            "email": ""
+        ])
+        let (_, response) = try await session.data(for: req)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 || code == 201 else {
+            throw APIError.registrationFailed(code)
+        }
+    }
+}
+
+extension InvidiousAPI.APIError {
+    static func registrationFailed(_ code: Int) -> InvidiousAPI.APIError {
+        return .authFailed
+    }
+}

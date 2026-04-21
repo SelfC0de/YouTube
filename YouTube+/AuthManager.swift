@@ -27,31 +27,29 @@ final class AuthManager: ObservableObject {
         UserDefaults.standard.set(username, forKey: usernameKey)
     }
 
+    func register(username: String, password: String) async throws {
+        try await InvidiousAPI.shared.register(username: username, password: password)
+        // auto login after register
+        try await login(username: username, password: password)
+    }
+
     func logout() {
-        token = ""
-        username = ""
-        isLoggedIn = false
+        token = ""; username = ""; isLoggedIn = false
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
     }
 
-    // MARK: - CSV Import from Google Takeout
     func importSubscriptionsFromCSV(data: Data, context: ModelContext) throws -> Int {
-        guard let content = String(data: data, encoding: .utf8) else {
-            throw ImportError.invalidFile
-        }
-        let lines = content.components(separatedBy: "\n").dropFirst() // skip header
+        guard let content = String(data: data, encoding: .utf8) else { throw ImportError.invalidFile }
+        let lines = content.components(separatedBy: "\n").dropFirst()
         var count = 0
         for line in lines {
             let parts = line.components(separatedBy: ",")
             guard parts.count >= 3 else { continue }
             let channelId = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            let channelUrl = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
             let channelName = parts[2].trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\"")))
             guard !channelId.isEmpty, channelId.hasPrefix("UC") else { continue }
-            let _ = channelUrl
-            let sub = LocalSubscription(channelId: channelId, channelName: channelName)
-            context.insert(sub)
+            context.insert(LocalSubscription(channelId: channelId, channelName: channelName))
             count += 1
         }
         try context.save()

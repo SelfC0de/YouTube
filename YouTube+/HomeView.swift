@@ -57,7 +57,7 @@ struct HomeView: View {
             .toolbar { toolbarContent }
             .toolbarBackground(Theme.bg2, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .sheet(isPresented: $showAuthSheet) { ImportSheet() }
+            .sheet(isPresented: $showAuthSheet) { AuthSheet() }
         }
         .task { await loadTrending() }
     }
