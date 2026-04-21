@@ -18,91 +18,87 @@ final class InvidiousAPI: ObservableObject {
         "https://invidious.incogniweb.net"
     ]
 
+    private var isSearching = false
     private init() {}
 
-    // MARK: - Instance discovery
+    // MARK: - Find working instance (parallel ping)
     func ensureInstance() async {
-        guard currentInstance.isEmpty else { return }
+        guard currentInstance.isEmpty, !isSearching else { return }
+        isSearching = true
         instanceStatus = "Поиск инстанса..."
 
-        // Pass 1: normal DNS
-        for inst in InvidiousAPI.instances {
-            if await ping(inst, useDoh: false) {
-                currentInstance = inst
-                instanceStatus = inst.replacingOccurrences(of: "https://", with: "")
-                return
-            }
+        if let found = await findWorkingInstance() {
+            currentInstance = found
+            instanceStatus = found.replacingOccurrences(of: "https://", with: "")
+        } else {
+            instanceStatus = "Нет доступных серверов"
         }
-
-        // Pass 2: DoH bypass
-        instanceStatus = "DoH обход..."
-        for inst in InvidiousAPI.instances {
-            if await ping(inst, useDoh: true) {
-                currentInstance = inst
-                instanceStatus = inst.replacingOccurrences(of: "https://", with: "") + " (DoH)"
-                return
-            }
-        }
-
-        currentInstance = InvidiousAPI.instances[0]
-        instanceStatus = "Нет подключения"
+        isSearching = false
     }
 
-    private func ping(_ instance: String, useDoh: Bool) async -> Bool {
-        guard let url = URL(string: "\(instance)/api/v1/stats") else { return false }
-        do {
-            let (_, response): (Data, URLResponse)
-            if useDoh {
-                (_, response) = try await DoHResolver.shared.dataBypassingDNS(for: url)
-            } else {
-                var req = URLRequest(url: url)
-                req.timeoutInterval = 8
-                (_, response) = try await DoHResolver.shared.makeSession().data(for: req)
+    // Параллельный пинг — берём первый ответивший
+    private func findWorkingInstance() async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            for inst in InvidiousAPI.instances {
+                group.addTask { [inst] in
+                    await self.ping(inst) ? inst : nil
+                }
             }
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            for await result in group {
+                if let found = result {
+                    group.cancelAll()
+                    return found
+                }
+            }
+            return nil
+        }
+    }
+
+    private func ping(_ instance: String) async -> Bool {
+        guard let url = URL(string: "\(instance)/api/v1/trending?region=RU") else { return false }
+        do {
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 10
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return false }
+            // Verify it actually returns video data
+            let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]]
+            return json != nil && !(json!.isEmpty)
         } catch { return false }
     }
 
-    // MARK: - Core fetch
-    private func requestData(path: String) async throws -> Data {
-        await ensureInstance()
-        let ordered = [currentInstance] + InvidiousAPI.instances.filter { $0 != currentInstance }
+    // MARK: - Core fetch with auto-retry
+    func requestData(path: String) async throws -> Data {
+        // If no instance yet, find one
+        if currentInstance.isEmpty {
+            await ensureInstance()
+        }
 
-        // Pass 1: normal
+        // Try current first, then others
+        let ordered = currentInstance.isEmpty
+            ? InvidiousAPI.instances
+            : ([currentInstance] + InvidiousAPI.instances.filter { $0 != currentInstance })
+
+        var lastError: Error = APIError.noData
         for inst in ordered {
-            if let data = try? await fetch(inst + path, useDoh: false) {
+            guard let url = URL(string: "\(inst)\(path)") else { continue }
+            do {
+                var req = URLRequest(url: url)
+                req.timeoutInterval = 15
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { continue }
+                // Update current if we switched
                 if inst != currentInstance {
                     currentInstance = inst
                     instanceStatus = inst.replacingOccurrences(of: "https://", with: "")
                 }
                 return data
+            } catch {
+                lastError = error
+                continue
             }
         }
-        // Pass 2: DoH
-        for inst in ordered {
-            if let data = try? await fetch(inst + path, useDoh: true) {
-                if inst != currentInstance {
-                    currentInstance = inst
-                    instanceStatus = inst.replacingOccurrences(of: "https://", with: "") + " (DoH)"
-                }
-                return data
-            }
-        }
-        throw APIError.noData
-    }
-
-    private func fetch(_ urlString: String, useDoh: Bool) async throws -> Data {
-        guard let url = URL(string: urlString) else { throw APIError.noData }
-        let (data, response): (Data, URLResponse)
-        if useDoh {
-            (data, response) = try await DoHResolver.shared.dataBypassingDNS(for: url)
-        } else {
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 15
-            (data, response) = try await DoHResolver.shared.makeSession().data(for: req)
-        }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.noData }
-        return data
+        throw lastError
     }
 
     // MARK: - Public API
@@ -134,26 +130,33 @@ final class InvidiousAPI: ObservableObject {
     }
 
     func login(username: String, password: String) async throws -> String {
-        await ensureInstance()
+        if currentInstance.isEmpty { await ensureInstance() }
         var req = URLRequest(url: URL(string: "\(currentInstance)/api/v1/auth/login")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(["username": username, "password": password])
-        let (data, response) = try await DoHResolver.shared.makeSession().data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.authFailed }
         struct TR: Codable { let token: String }
         return try JSONDecoder().decode(TR.self, from: data).token
     }
 
     func register(username: String, password: String) async throws {
-        await ensureInstance()
+        if currentInstance.isEmpty { await ensureInstance() }
         var req = URLRequest(url: URL(string: "\(currentInstance)/api/v1/auth/register")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(["username": username, "password": password, "email": ""])
-        let (_, response) = try await DoHResolver.shared.makeSession().data(for: req)
+        let (_, response) = try await URLSession.shared.data(for: req)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 || code == 201 else { throw APIError.authFailed }
+    }
+
+    // Force re-search (for settings refresh button)
+    func resetAndFind() async {
+        currentInstance = ""
+        isSearching = false
+        await ensureInstance()
     }
 
     enum APIError: LocalizedError {

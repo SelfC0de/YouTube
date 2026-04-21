@@ -49,7 +49,7 @@ struct SettingsView: View {
                 Button {
                     Task {
                         api.currentInstance = ""
-                        await api.ensureInstance()
+                        await api.resetAndFind()
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise")
