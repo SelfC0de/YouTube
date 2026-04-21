@@ -15,7 +15,7 @@ struct HomeView: View {
     @State private var showAuthSheet = false
 
     let chips = ["Главная", "Музыка", "Игры", "Новости", "Технологии"]
-    let chipQueries = ["популярное 2025", "music hits 2025", "gaming 2025", "новости", "tech review 2025"]
+    let chipQueries = ["популярное 2026", "music hits 2026", "gaming 2026", "новости 2026", "tech review 2026"]
 
     var body: some View {
         NavigationStack {
@@ -141,7 +141,7 @@ struct HomeView: View {
         errorMessage = nil
 
         // Trending сломан на всех публичных инстансах — используем поиск популярного
-        let queries = ["популярное", "music 2025", "новости сегодня", "gaming", "tech 2025"]
+        let queries = ["популярное", "music 2026", "новости сегодня", "gaming", "tech 2026"]
         let query = queries[Int.random(in: 0..<queries.count)]
 
         do {
