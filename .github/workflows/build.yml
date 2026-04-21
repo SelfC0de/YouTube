@@ -1,0 +1,67 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build .app
+        run: |
+          xcodebuild \
+            -project "YouTube+.xcodeproj" \
+            -scheme "YouTube+" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package IPA
+        run: |
+          APP_PATH=$(find build -name "YouTube+.app" | head -1)
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r YouTube+.ipa Payload/
+          rm -rf Payload
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "YouTube+/Info.plist")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "YouTube+/Info.plist")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+
+      - name: Create Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-b${{ steps.version.outputs.build }}
+          name: YouTube+ v${{ steps.version.outputs.version }} (build ${{ steps.version.outputs.build }})
+          prerelease: true
+          files: YouTube+.ipa
+          body: |
+            ## YouTube+ v${{ steps.version.outputs.version }}
+
+            ### Установка
+            Sideloadly: перетащи IPA → Apple ID Sideload
+
+            ### Что внутри
+            - Поиск и просмотр без VPN (Invidious)
+            - Скачивание видео/аудио локально
+            - SponsorBlock — скип рекламных вставок
+            - Return YouTube Dislike — дизлайки
+            - Picture-in-Picture
+            - История просмотров
+            - Авторизация Invidious + импорт подписок CSV
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
