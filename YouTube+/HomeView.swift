@@ -23,7 +23,6 @@ struct HomeView: View {
                 Theme.bg.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 0) {
-                        instanceBadge
                         chipsRow
                         if isLoading {
                             ProgressView().tint(Theme.accent).padding(.top, 60)

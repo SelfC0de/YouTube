@@ -32,7 +32,7 @@ struct VideoCardView: View {
 
     private var thumbnailFull: some View {
         ZStack(alignment: .bottomTrailing) {
-            CachedAsyncImage(url: video.bestThumbnail)
+            ProxiedImage(url: video.bestThumbnail)
                 .frame(height: 150)
                 .clipped()
             if let d = video.durationFormatted {
@@ -62,7 +62,7 @@ struct VideoCardView: View {
 
     private var thumbnailCompact: some View {
         ZStack(alignment: .bottomTrailing) {
-            CachedAsyncImage(url: video.bestThumbnail)
+            ProxiedImage(url: video.bestThumbnail)
                 .frame(width: 90, height: 54)
                 .cornerRadius(10).clipped()
             if let d = video.durationFormatted {
@@ -81,25 +81,50 @@ struct VideoCardView: View {
     }
 }
 
-// Image cache wrapper — reuses URLCache, avoids redundant fetches
-struct CachedAsyncImage: View {
+// Проксирует изображения через свой сервер если URL от ytimg.com (заблокирован в РФ)
+struct ProxiedImage: View {
     let url: String
+
+    private var proxiedURL: URL? {
+        // ytimg.com заблокирован в РФ — проксируем через наш Yattee Server
+        if url.contains("ytimg.com") || url.contains("ggpht.com") {
+            let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
+            let proxyURL = "https://youtubeplus.ydns.eu/proxy/thumbnails?url=\(encoded)"
+            return URL(string: proxyURL)
+        }
+        return URL(string: url)
+    }
+
     var body: some View {
-        if let u = URL(string: url) {
+        if let u = proxiedURL {
             AsyncImage(url: u) { phase in
                 switch phase {
                 case .success(let img):
                     img.resizable().aspectRatio(16/9, contentMode: .fill)
                 case .failure:
-                    Rectangle().fill(Theme.bg3)
+                    // Fallback: прямой URL
+                    AsyncImage(url: URL(string: url)) { p in
+                        switch p {
+                        case .success(let img):
+                            img.resizable().aspectRatio(16/9, contentMode: .fill)
+                        default:
+                            thumbnailPlaceholder
+                        }
+                    }
                 case .empty:
-                    Rectangle().fill(Theme.bg3).overlay(ProgressView().scaleEffect(0.5).tint(Theme.text3))
-                @unknown default:
                     Rectangle().fill(Theme.bg3)
+                        .overlay(ProgressView().scaleEffect(0.5).tint(Theme.text3))
+                @unknown default:
+                    thumbnailPlaceholder
                 }
             }
         } else {
-            Rectangle().fill(Theme.bg3)
+            thumbnailPlaceholder
         }
+    }
+
+    private var thumbnailPlaceholder: some View {
+        Rectangle().fill(Theme.bg3)
+            .overlay(Image(systemName: "play.rectangle").foregroundColor(Theme.text3).font(.system(size: 20)))
     }
 }
