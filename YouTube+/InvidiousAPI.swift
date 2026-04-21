@@ -227,13 +227,13 @@ final class InvidiousAPI: ObservableObject {
     func proxyStreamURL(_ url: String) -> String {
         guard url.contains("googlevideo.com") || url.contains("videoplayback") else { return url }
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "https://youtubeplus.ydns.eu/videostream?url=\(encoded)"
+        return "http://youtubeplus.ydns.eu/videostream?url=\(encoded)"
     }
 
     func proxyHLSURL(_ url: String) -> String {
         guard url.contains("googlevideo.com") || url.contains("manifest.googlevideo") else { return url }
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "https://youtubeplus.ydns.eu/videostream?url=\(encoded)"
+        return "http://youtubeplus.ydns.eu/videostream?url=\(encoded)"
     }
 
     enum APIError: LocalizedError {
