@@ -235,6 +235,8 @@ final class InvidiousAPI: ObservableObject {
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
         return "https://youtubeplus.ydns.eu/videostream?url=\(encoded)"
     }
+
+    enum APIError: LocalizedError {
         case authFailed, noData
         var errorDescription: String? {
             switch self {
