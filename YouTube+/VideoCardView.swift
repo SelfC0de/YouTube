@@ -116,12 +116,12 @@ struct ProxiedImage: View {
         loading = true
         image = nil
 
-        // Пробуем через прокси
-        if let img = await fetch(proxyURL) {
+        // Пробуем прямой URL сначала
+        if let img = await fetch(url) {
             image = img; loading = false; return
         }
-        // Fallback: прямой URL
-        if let img = await fetch(url) {
+        // Fallback: через прокси
+        if let img = await fetch(proxyURL) {
             image = img; loading = false; return
         }
         loading = false
