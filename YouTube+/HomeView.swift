@@ -6,6 +6,7 @@ struct HomeView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var selectedChip = "Главная"
+    @State private var showAuthSheet = false
 
     let chips = ["Главная", "Музыка", "Игры", "Новости", "Технологии"]
 
@@ -31,8 +32,7 @@ struct HomeView: View {
                                 Button("Повторить") { Task { await loadTrending() } }
                                     .font(.system(size: 14, weight: .semibold))
                                     .padding(.horizontal, 20).padding(.vertical, 10)
-                                    .background(Theme.accent)
-                                    .foregroundColor(.white)
+                                    .background(Theme.accent).foregroundColor(.white)
                                     .cornerRadius(12)
                             }
                             .padding(.top, 60)
@@ -57,6 +57,7 @@ struct HomeView: View {
             .toolbar { toolbarContent }
             .toolbarBackground(Theme.bg2, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .sheet(isPresented: $showAuthSheet) { ImportSheet() }
         }
         .task { await loadTrending() }
     }
@@ -64,9 +65,9 @@ struct HomeView: View {
     private var instanceBadge: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(videos.isEmpty ? Theme.text3 : Theme.green)
+                .fill(videos.isEmpty && errorMessage != nil ? Theme.accent : Theme.green)
                 .frame(width: 6, height: 6)
-                .shadow(color: videos.isEmpty ? .clear : Theme.green, radius: 3)
+                .shadow(color: Theme.green, radius: 3)
             Text(api.instanceStatus)
                 .font(.system(size: 11))
                 .foregroundColor(Theme.text3)
@@ -93,8 +94,7 @@ struct HomeView: View {
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.06), lineWidth: selectedChip == chip ? 0 : 1))
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 16).padding(.vertical, 12)
         }
     }
 
@@ -106,9 +106,12 @@ struct HomeView: View {
                 .foregroundStyle(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .leading, endPoint: .trailing))
         }
         ToolbarItem(placement: .navigationBarTrailing) {
-            HStack(spacing: 8) {
-                Image(systemName: "bell").foregroundColor(Theme.text2)
-                Image(systemName: "person.circle").foregroundColor(Theme.text2)
+            Button {
+                showAuthSheet = true
+            } label: {
+                Image(systemName: AuthManager.shared.isLoggedIn ? "person.circle.fill" : "person.circle")
+                    .foregroundColor(AuthManager.shared.isLoggedIn ? Theme.accent : Theme.text2)
+                    .font(.system(size: 18))
             }
         }
     }
