@@ -305,52 +305,49 @@ final class PlayerViewModel: ObservableObject {
 
     private func playStream(detail: InvidiousVideoDetail, quality: String) async {
         loadError = ""
+        let api = InvidiousAPI.shared
 
         // Audio only
         if quality.contains("kbps") {
-            if let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio }),
-               let url = URL(string: audio.url) { start(url: url); return }
+            if let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio }) {
+                start(url: URL(string: api.proxyStreamURL(audio.url))!); return
+            }
             if let s = detail.safeFormatStreams.first(where: { $0.itag != "91" && $0.itag != "91-0" }),
-               let url = URL(string: s.url) { start(url: url) }
+               let url = URL(string: api.proxyStreamURL(s.url)) { start(url: url) }
             return
         }
 
-        // 1. HLS manifest — itag 91 или URL содержит hls_variant/manifest
-        if let hls = detail.hlsUrl, let url = URL(string: hls) {
+        // 1. HLS manifest
+        if let hls = detail.hlsUrl, let url = URL(string: api.proxyHLSURL(hls)) {
             start(url: url); return
         }
         if let s = detail.safeFormatStreams.first(where: {
             $0.url.contains("hls_variant") || $0.url.contains("/manifest/") || $0.itag == "91" || $0.itag == "91-0"
-        }), let url = URL(string: s.url) {
+        }), let url = URL(string: api.proxyHLSURL(s.url)) {
             start(url: url); return
         }
 
-        // 2. itag=18 — mp4 360p video+audio combined, самый надёжный
+        // 2. itag=18 — mp4 360p video+audio, самый надёжный
         if let s = detail.safeFormatStreams.first(where: { $0.itag == "18" }),
-           let url = URL(string: s.url) {
+           let url = URL(string: api.proxyStreamURL(s.url)) {
             start(url: url); return
         }
 
-        // 3. Любой formatStream с qualityLabel совпадающим
+        // 3. formatStream по qualityLabel
         if let s = detail.safeFormatStreams.first(where: { $0.qualityLabel == quality }),
-           let url = URL(string: s.url) {
+           let url = URL(string: api.proxyStreamURL(s.url)) {
             start(url: url); return
         }
 
-        // 4. Первый formatStream не HLS
+        // 4. Первый не-HLS formatStream
         if let s = detail.safeFormatStreams.first(where: { !$0.url.contains("manifest") && !$0.url.contains("hls_variant") }),
-           let url = URL(string: s.url) {
+           let url = URL(string: api.proxyStreamURL(s.url)) {
             start(url: url); return
         }
 
         // 5. Любой formatStream
-        if let s = detail.safeFormatStreams.first, let url = URL(string: s.url) {
-            start(url: url); return
-        }
-
-        // 6. adaptiveFormats видео (без аудио — последний resort)
-        if let f = detail.safeAdaptiveFormats.first(where: { $0.isVideo }),
-           let url = URL(string: f.url) {
+        if let s = detail.safeFormatStreams.first,
+           let url = URL(string: api.proxyStreamURL(s.url)) {
             start(url: url); return
         }
 
