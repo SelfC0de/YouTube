@@ -255,24 +255,39 @@ final class PlayerViewModel: ObservableObject {
     private func buildQualityList(from d: InvidiousVideoDetail) {
         let order = ["144p", "240p", "360p", "480p", "720p", "720p60", "1080p", "1080p60", "1440p", "2160p"]
 
-        var fromStreams = d.safeFormatStreams.compactMap { $0.qualityLabel }.filter { !$0.isEmpty }
-        let fromAdaptive = d.safeAdaptiveFormats.filter { $0.isVideo }.compactMap { $0.qualityLabel }.filter { !$0.isEmpty }
-        fromStreams += fromAdaptive
+        // formatStreams — берём только не-HLS потоки
+        let streamQualities = d.safeFormatStreams
+            .filter { !$0.url.contains("manifest") && !$0.url.contains("hls_variant") && $0.itag != "91" && $0.itag != "91-0" }
+            .compactMap { $0.qualityLabel ?? itagToLabel($0.itag) }
+            .filter { !$0.isEmpty }
 
+        let adaptiveQualities = d.safeAdaptiveFormats
+            .filter { $0.isVideo }
+            .compactMap { $0.qualityLabel }
+            .filter { !$0.isEmpty }
+
+        var combined = streamQualities + adaptiveQualities
         var seen = Set<String>()
-        let unique = fromStreams.filter { seen.insert($0).inserted }
-        let sorted = order.filter { unique.contains($0) }
-        videoQualities = sorted.isEmpty ? unique : sorted
+        combined = combined.filter { seen.insert($0).inserted }
+        let sorted = order.filter { combined.contains($0) }
+        videoQualities = sorted.isEmpty ? (combined.isEmpty ? ["360p"] : combined) : sorted
 
-        // HLS available — auto quality switching, set as default
-        if d.hlsUrl != nil {
-            if !videoQualities.contains("HLS (авто)") {
-                videoQualities.insert("HLS (авто)", at: 0)
-            }
-            selectedQuality = "HLS (авто)"
-        } else {
-            let preferred = ["720p", "720p60", "480p", "360p", "240p"]
-            selectedQuality = preferred.first { videoQualities.contains($0) } ?? videoQualities.first ?? "360p"
+        if d.safeFormatStreams.contains(where: { $0.url.contains("hls_variant") || $0.url.contains("/manifest/") }) {
+            if !videoQualities.contains("HLS (авто)") { videoQualities.insert("HLS (авто)", at: 0) }
+        }
+
+        let preferred = ["HLS (авто)", "720p", "720p60", "480p", "360p"]
+        selectedQuality = preferred.first { videoQualities.contains($0) } ?? videoQualities.first ?? "360p"
+    }
+
+    private func itagToLabel(_ itag: String?) -> String? {
+        switch itag {
+        case "18": return "360p"
+        case "22": return "720p"
+        case "37": return "1080p"
+        case "36": return "240p"
+        case "17": return "144p"
+        default: return nil
         }
     }
 
@@ -295,36 +310,45 @@ final class PlayerViewModel: ObservableObject {
         if quality.contains("kbps") {
             if let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio }),
                let url = URL(string: audio.url) { start(url: url); return }
-            if let s = detail.safeFormatStreams.first,
+            if let s = detail.safeFormatStreams.first(where: { $0.itag != "91" && $0.itag != "91-0" }),
                let url = URL(string: s.url) { start(url: url) }
             return
         }
 
-        // 1. hlsUrl из поля (Invidious иногда заполняет)
+        // 1. HLS manifest — itag 91 или URL содержит hls_variant/manifest
         if let hls = detail.hlsUrl, let url = URL(string: hls) {
             start(url: url); return
         }
-
-        // 2. HLS из formatStreams — itag=91 или URL содержит hls_variant
-        if let hlsStream = detail.safeFormatStreams.first(where: {
-            $0.itag == "91" || ($0.url.contains("hls_variant") || $0.url.contains("manifest"))
-        }), let url = URL(string: hlsStream.url) {
+        if let s = detail.safeFormatStreams.first(where: {
+            $0.url.contains("hls_variant") || $0.url.contains("/manifest/") || $0.itag == "91" || $0.itag == "91-0"
+        }), let url = URL(string: s.url) {
             start(url: url); return
         }
 
-        // 3. formatStream по выбранному качеству
+        // 2. itag=18 — mp4 360p video+audio combined, самый надёжный
+        if let s = detail.safeFormatStreams.first(where: { $0.itag == "18" }),
+           let url = URL(string: s.url) {
+            start(url: url); return
+        }
+
+        // 3. Любой formatStream с qualityLabel совпадающим
         if let s = detail.safeFormatStreams.first(where: { $0.qualityLabel == quality }),
            let url = URL(string: s.url) {
             start(url: url); return
         }
 
-        // 4. Первый formatStream (видео + аудио combined, itag=18 = 360p mp4)
-        if let s = detail.safeFormatStreams.first(where: { $0.itag != "91" }),
+        // 4. Первый formatStream не HLS
+        if let s = detail.safeFormatStreams.first(where: { !$0.url.contains("manifest") && !$0.url.contains("hls_variant") }),
            let url = URL(string: s.url) {
             start(url: url); return
         }
 
-        // 5. adaptiveFormats видео
+        // 5. Любой formatStream
+        if let s = detail.safeFormatStreams.first, let url = URL(string: s.url) {
+            start(url: url); return
+        }
+
+        // 6. adaptiveFormats видео (без аудио — последний resort)
         if let f = detail.safeAdaptiveFormats.first(where: { $0.isVideo }),
            let url = URL(string: f.url) {
             start(url: url); return
