@@ -81,50 +81,78 @@ struct VideoCardView: View {
     }
 }
 
-// Проксирует изображения через свой сервер если URL от ytimg.com (заблокирован в РФ)
+// Загружает изображения через свой сервер-прокси с поддержкой самоподписанного сертификата
 struct ProxiedImage: View {
     let url: String
+    @State private var image: UIImage?
+    @State private var loading = true
 
-    private var proxiedURL: URL? {
-        // ytimg.com заблокирован в РФ — проксируем через наш Yattee Server
-        if url.contains("ytimg.com") || url.contains("ggpht.com") {
-            let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-            let proxyURL = "https://youtubeplus.ydns.eu/proxy/thumbnails?url=\(encoded)"
-            return URL(string: proxyURL)
-        }
-        return URL(string: url)
-    }
+    private static let session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 15
+        cfg.urlCache = URLCache(memoryCapacity: 50*1024*1024, diskCapacity: 200*1024*1024)
+        return URLSession(configuration: cfg, delegate: TrustAllImageDelegate(), delegateQueue: nil)
+    }()
 
     var body: some View {
-        if let u = proxiedURL {
-            AsyncImage(url: u) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().aspectRatio(16/9, contentMode: .fill)
-                case .failure:
-                    // Fallback: прямой URL
-                    AsyncImage(url: URL(string: url)) { p in
-                        switch p {
-                        case .success(let img):
-                            img.resizable().aspectRatio(16/9, contentMode: .fill)
-                        default:
-                            thumbnailPlaceholder
-                        }
-                    }
-                case .empty:
-                    Rectangle().fill(Theme.bg3)
-                        .overlay(ProgressView().scaleEffect(0.5).tint(Theme.text3))
-                @unknown default:
-                    thumbnailPlaceholder
-                }
+        ZStack {
+            Rectangle().fill(Theme.bg3)
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+                    .aspectRatio(16/9, contentMode: .fill)
+            } else if loading {
+                ProgressView().scaleEffect(0.5).tint(Theme.text3)
+            } else {
+                Image(systemName: "play.rectangle")
+                    .foregroundColor(Theme.text3)
+                    .font(.system(size: 20))
             }
-        } else {
-            thumbnailPlaceholder
         }
+        .task(id: url) { await loadImage() }
     }
 
-    private var thumbnailPlaceholder: some View {
-        Rectangle().fill(Theme.bg3)
-            .overlay(Image(systemName: "play.rectangle").foregroundColor(Theme.text3).font(.system(size: 20)))
+    private func loadImage() async {
+        loading = true
+        image = nil
+
+        // Пробуем через прокси
+        if let img = await fetch(proxyURL) {
+            image = img; loading = false; return
+        }
+        // Fallback: прямой URL
+        if let img = await fetch(url) {
+            image = img; loading = false; return
+        }
+        loading = false
+    }
+
+    private var proxyURL: String {
+        let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
+        return "https://youtubeplus.ydns.eu/proxy/thumbnails?url=\(encoded)"
+    }
+
+    private func fetch(_ urlString: String) async -> UIImage? {
+        guard let url = URL(string: urlString) else { return nil }
+        // Проверяем кеш
+        let req = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+        if let cached = Self.session.configuration.urlCache?.cachedResponse(for: req),
+           let img = UIImage(data: cached.data) { return img }
+        do {
+            let (data, resp) = try await Self.session.data(for: req)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return UIImage(data: data)
+        } catch { return nil }
+    }
+}
+
+private final class TrustAllImageDelegate: NSObject, URLSessionDelegate {
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 }
