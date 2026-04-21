@@ -9,7 +9,7 @@ final class InvidiousAPI: ObservableObject {
 
     // MARK: - Свой сервер (приоритет)
     private enum Primary {
-        static let url  = "https://youtubeplus.ydns.eu"
+        static let url  = "https://selfcode-api.win"
         static let user = "admin"
         static let pass = "ea399iEa2zEP9KmW3L"
         static var auth: String {
@@ -227,13 +227,13 @@ final class InvidiousAPI: ObservableObject {
     func proxyStreamURL(_ url: String) -> String {
         guard url.contains("googlevideo.com") || url.contains("videoplayback") else { return url }
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "http://youtubeplus.ydns.eu/videostream?url=\(encoded)"
+        return "https://selfcode-api.win/videostream?url=\(encoded)"
     }
 
     func proxyHLSURL(_ url: String) -> String {
         guard url.contains("googlevideo.com") || url.contains("manifest.googlevideo") else { return url }
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "http://youtubeplus.ydns.eu/videostream?url=\(encoded)"
+        return "https://selfcode-api.win/videostream?url=\(encoded)"
     }
 
     enum APIError: LocalizedError {

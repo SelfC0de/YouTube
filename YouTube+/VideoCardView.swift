@@ -129,7 +129,7 @@ struct ProxiedImage: View {
 
     private var proxyURL: String {
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "https://youtubeplus.ydns.eu/proxy/thumbnails?url=\(encoded)"
+        return "https://selfcode-api.win/proxy/thumbnails?url=\(encoded)"
     }
 
     private func fetch(_ urlString: String) async -> UIImage? {
