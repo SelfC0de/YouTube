@@ -355,7 +355,12 @@ final class PlayerViewModel: ObservableObject {
     }
 
     private func start(url: URL) {
-        let p = AVPlayer(url: url)
+        // AVURLAsset с кастомными опциями для обхода SSL проверки самоподписанного сертификата
+        let headers = ["Authorization": InvidiousAPI.primaryAuth]
+        let options = ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        let asset = AVURLAsset(url: url, options: options)
+        let item = AVPlayerItem(asset: asset)
+        let p = AVPlayer(playerItem: item)
         player = p
         if AVPictureInPictureController.isPictureInPictureSupported() {
             pipController = AVPictureInPictureController(playerLayer: AVPlayerLayer(player: p))

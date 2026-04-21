@@ -17,6 +17,8 @@ final class InvidiousAPI: ObservableObject {
         }
     }
 
+    static var primaryAuth: String { Primary.auth }
+
     // MARK: - Публичные инстансы (fallback)
     private static let publicInstances: [String] = [
         "https://inv.nadeko.net",
@@ -227,13 +229,13 @@ final class InvidiousAPI: ObservableObject {
     func proxyStreamURL(_ url: String) -> String {
         guard url.contains("googlevideo.com") || url.contains("videoplayback") else { return url }
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "https://api.selfcode-api.win/videostream?url=\(encoded)"
+        return "http://78.17.47.210/videostream?url=\(encoded)"
     }
 
     func proxyHLSURL(_ url: String) -> String {
         guard url.contains("googlevideo.com") || url.contains("manifest.googlevideo") else { return url }
         let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url
-        return "https://api.selfcode-api.win/videostream?url=\(encoded)"
+        return "http://78.17.47.210/videostream?url=\(encoded)"
     }
 
     enum APIError: LocalizedError {
