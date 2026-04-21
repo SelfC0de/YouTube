@@ -24,13 +24,18 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func download(detail: InvidiousVideoDetail, quality: String, context: ModelContext) {
         let streamURL: String
-        if quality == "audio" {
-            guard let audio = detail.adaptiveFormats.first(where: { $0.isAudio }) else { return }
-            streamURL = audio.url
+        if quality.contains("kbps") {
+            if let audio = detail.safeAdaptiveFormats.first(where: { $0.isAudio }) {
+                streamURL = audio.url
+            } else if let fallback = detail.safeFormatStreams.first {
+                streamURL = fallback.url
+            } else { return }
         } else {
-            if let fmt = detail.adaptiveFormats.first(where: { $0.qualityLabel == quality && $0.isVideo }) {
+            if let fmt = detail.safeFormatStreams.first(where: { $0.qualityLabel == quality }) {
                 streamURL = fmt.url
-            } else if let fallback = detail.formatStreams.first {
+            } else if let fmt = detail.safeAdaptiveFormats.first(where: { $0.qualityLabel == quality && $0.isVideo }) {
+                streamURL = fmt.url
+            } else if let fallback = detail.safeFormatStreams.first {
                 streamURL = fallback.url
             } else { return }
         }

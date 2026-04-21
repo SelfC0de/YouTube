@@ -342,17 +342,17 @@ final class PlayerViewModel: ObservableObject {
 
     private func setupSponsorBlock() {
         guard !sponsorSegments.isEmpty, let player else { return }
+        let segments = sponsorSegments
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self] time in
-            guard let self else { return }
-            for seg in self.sponsorSegments {
+            let cur = time.seconds
+            for seg in segments {
                 guard seg.segment.count == 2 else { continue }
-                let cur = time.seconds
                 if cur >= seg.segment[0] && cur < seg.segment[1] {
                     player.seek(to: CMTime(seconds: seg.segment[1], preferredTimescale: 600))
-                    self.sponsorNote = "Пропущен спонсор"
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
+                        self?.sponsorNote = "Пропущен спонсор"
                         try? await Task.sleep(nanoseconds: 3_000_000_000)
-                        self.sponsorNote = nil
+                        self?.sponsorNote = nil
                     }
                     break
                 }
